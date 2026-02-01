@@ -5,6 +5,7 @@ from aiohttp import web, ClientSession
 from aiohttp.web_request import Request
 from aiohttp.web_response import Response
 import logging
+from simple_circuit_breaker import CircuitBreaker
 from typing import Dict, Set, Awaitable, Optional, List
 
 routes = web.RouteTableDef()
@@ -59,10 +60,18 @@ async def get_products_with_inventory(session: ClientSession, product_response) 
     def create_product_record(product_id: str, inventory: Optional[int]) -> Dict:
         return {'product_id': product_id, 'inventory': inventory}
     
+    inventory_circuit = CircuitBreaker(get_inventory, timeout=.5, time_window=5.0, max_failures=3, reset_interval=30)
+
     # {Task: Product_id}
+    # inventory_tasks_to_product_id = {
+    #     get_inventory(session, product['product_id']): product['product_id']
+    #     for product in product_response
+    # }
+
+    # With circuit breaker
     inventory_tasks_to_product_id = {
-        get_inventory(session, product['product_id']): product['product_id']
-        for product in product_response
+        inventory_circuit.request(session, product['product_id']): product['product_id']
+        for product in product_response 
     }
 
     inventory_done, inventory_pending = await asyncio.wait(inventory_tasks_to_product_id.keys(), timeout=1.0)
